@@ -1,0 +1,231 @@
+-- Exercitiul 12
+
+/*1. Selectează angajații care au lucrat zboruri rezervate de clienți care au nivelul de fidelitate “Silver” și numărul zborurilor de acest tip. (cerința a)subcereri sincronizate în care intervin cel puțin 3 tabele  + cerința f)utilizarea a cel puțin 1 bloc de cerere (clauza WITH))*/
+
+WITH zboruri_silver AS(
+    SELECT z.cod_zbor
+    FROM zbor z
+    INNER JOIN rezervare r ON r.cod_zbor=z.cod_zbor
+    INNER JOIN cont_client c ON r.cod_client=c.cod_client
+    WHERE c.nivel_fidelitate='Silver')
+    
+SELECT oa.cod_angajat, COUNT(*) AS numar_zboruri_silver
+FROM orar_angajati oa
+WHERE oa.cod_zbor IN (SELECT cod_zbor FROM zboruri_silver)
+GROUP BY oa.cod_angajat
+HAVING COUNT(*)>=1
+ORDER BY oa.cod_angajat DESC;
+
+
+/*2. Selectează codurile zborurilor și numărul de pasageri pentru zborurile care au mai puțini pasageri decât media numărului de pasageri pentru toate zborurile(cerinta b)b) subcereri nesincronizate în clauza FROM  )*/
+
+SELECT 
+    r.cod_zbor,
+    COUNT(*) AS nr_pasageri
+FROM PASAGER p
+INNER JOIN REZERVARE r ON p.cod_pasager = r.cod_pasager
+GROUP BY r.cod_zbor
+HAVING COUNT(*) < (
+    SELECT AVG(nr_pasageri)
+    FROM (
+        SELECT r2.cod_zbor, COUNT(*) AS nr_pasageri
+        FROM PASAGER p2
+        JOIN REZERVARE r2 ON p2.cod_pasager = r2.cod_pasager
+        GROUP BY r2.cod_zbor
+    )
+);
+
+/*3.Afișează pentru fiecare combinație posibilă de zbor și loc: codul zborului, codul locului, statusul locului ('Loc liber' dacă nu este ocupat sau 'Loc ocupat' dacă este deja ocupat), precum și codul pasagerului care ocupă locul (sau 'Fără pasager' dacă locul este liber). Rezultatele trebuie sortate descrescător după codul zborului. (cerința d)ordonări și utilizarea funcțiilor NVL și DECODE (în cadrul aceleiași cereri).*/
+
+SELECT 
+    z.cod_zbor,
+    l.cod_loc,
+    DECODE(ol.cod_loc, NULL, 'Loc liber', 'Loc ocupat') AS status,
+    NVL(TO_CHAR(ol.cod_pasager), 'Fără pasager') AS pasager
+FROM zbor z
+CROSS JOIN loc l
+LEFT JOIN ocupare_loc ol 
+    ON ol.cod_zbor = z.cod_zbor 
+   AND ol.cod_loc = l.cod_loc
+ORDER BY z.cod_zbor DESC;
+
+
+/*4.Să se afișeze, pentru fiecare client, codul clientului și numărul total de rezervări efectuate.Se vor afișa doar acei clienți care au efectuat mai multe rezervări decât numărul de rezervări asociate clienților care dețin conturi de fidelitate de nivel 'Bronze' și care au făcut rezervări pentru pasageri care au cel puțin un bagaj de tip „cală”.(cerinta c)grupări de date, funcții grup, filtrare la nivel de grupuri cu subcereri nesincronizate (în clauza de HAVING) în care intervin cel puțin 3 tabele (in cadrul aceleiași cereri))*/
+
+
+SELECT 
+    c.cod_client,
+    COUNT(*) AS nr_rezervari
+FROM client c
+JOIN rezervare r ON r.cod_client = c.cod_client
+GROUP BY c.cod_client
+HAVING COUNT(*) > (
+    SELECT COUNT(*)
+    FROM cont_client cc
+    JOIN client c2 ON c2.cod_client = cc.cod_client
+    JOIN rezervare r2 ON r2.cod_client = c2.cod_client
+    JOIN pasager p2 ON p2.cod_pasager = r2.cod_pasager
+    JOIN bagaj b2 ON b2.cod_pasager = p2.cod_pasager
+    WHERE LOWER(cc.nivel_fidelitate) = 'bronze'
+      AND LOWER(b2.tip) = 'cală'
+); 
+
+
+/*5.Să se afișeze detalii despre fiecare rezervare, incluzând codul rezervării, numărul de luni până la zbor, ora plecării, anul și luna plecării zborului, inițiala prenumelui clientului, tipul și greutatea estimată a bagajului. Se va ordona după luni rămase și oră. (cerința e)utilizarea a cel puțin 2 funcții pe șiruri de caractere, 2 funcții pe date calendaristice, a cel puțin unei expresii CASE)*/
+
+
+SELECT 
+    r.cod_client || '-' || r.cod_zbor AS cod_rezervare,
+    ROUND(MONTHS_BETWEEN(z.data_plecare, r.data_rezervarii)) AS luni_ramase,
+    TO_CHAR(z.data_plecare, 'HH24:MI:SS') AS ora_plecare,
+    EXTRACT(YEAR FROM z.data_plecare) AS an_plecare,
+    EXTRACT(MONTH FROM z.data_plecare) AS luna_plecare,
+    SUBSTR(c.prenume, 1, 1) AS initiala_prenume_client,
+    b.tip AS tip_bagaj,
+    CASE 
+        WHEN LOWER(b.tip) = 'standard' THEN '10 kg'
+        WHEN LOWER(b.tip) = 'compartiment' THEN '20 kg'
+        WHEN LOWER(b.tip) = 'cala' THEN '32 kg'
+        ELSE 'Nespecificat'
+    END AS greutate_estimata
+FROM rezervare r
+JOIN client c ON c.cod_client = r.cod_client
+JOIN zbor z ON z.cod_zbor = r.cod_zbor
+JOIN pasager p ON p.cod_pasager = r.cod_pasager
+LEFT JOIN bagaj b ON b.cod_pasager = p.cod_pasager
+ORDER BY luni_ramase ASC, ora_plecare;
+
+
+-- Exercitiul 13
+
+/*1.UPDATE
+Măriți salariul însoțitorilor de zbor ce vorbesc minim două limbi cu 10%.*/
+
+UPDATE angajat
+SET salariu = salariu * 1.10
+WHERE cod_angajat IN (
+    SELECT cod_angajat
+    FROM insotitor_zbor
+    WHERE nr_limbi_vorbite >= 2);
+
+
+/*2.UPDATE
+Schimbați statusul rezervărilor în care pasagerii au bagaj de tip “Compartiment” în confirmat.*/
+
+
+UPDATE rezervare r
+SET r.status = 'confirmat'
+WHERE r.cod_pasager IN (
+    SELECT b.cod_pasager
+    FROM bagaj b
+    WHERE LOWER(b.tip) = 'compartiment'
+);
+
+
+/*3.DELETE
+ 
+Ștergeți aeronavele care nu au participat la niciun zbor în ultimele 6 luni.*/
+
+DELETE FROM aeronava a
+WHERE a.cod_aeronava NOT IN (
+    SELECT z.cod_aeronava
+    FROM zbor z
+    WHERE z.data_plecare >= ADD_MONTHS(SYSDATE, -6)
+);
+
+
+-- Exercitiul 14
+
+CREATE OR REPLACE VIEW v_rezervari_extinse AS
+SELECT 
+  r.cod_client,
+  r.cod_zbor,
+  r.cod_pasager,
+  r.data_rezervarii,        
+  r.status,
+  c.nume_client AS nume_client,
+  z.data_plecare,
+  p.nume_pasager AS nume_pasager
+FROM rezervare r
+JOIN client c ON r.cod_client = c.cod_client
+JOIN zbor z ON r.cod_zbor = z.cod_zbor
+JOIN pasager p ON r.cod_pasager = p.cod_pasager;
+
+
+-- Operatie permisa
+
+UPDATE v_rezervari_extinse
+SET data_rezervarii = TO_DATE('2025-07-15', 'YYYY-MM-DD')
+WHERE cod_client = 7 AND cod_zbor = 'ZB4';
+
+
+
+-- Operatie nepermisa
+
+INSERT INTO v_rezervari_extinse (cod_client, cod_zbor, cod_pasager, data_rezervarii, status, nume_client, data_plecare, nume_pasager)
+VALUES (12, 'ZB100', 45, SYSDATE, 'confirmat', 'Popescu', TO_DATE('2025-12-01', 'YYYY-MM-DD'), 'Ion');
+
+
+-- Exercitiul 15
+
+/*1.Să se afișeze toate zborurile înregistrate în sistem, împreună cu informații despre aeronava utilizată, aeroportul de plecare și aeroportul de sosire. Pentru fiecare zbor, se vor afișa și datele clienților care au efectuat rezervări, precum și data rezervării. În plus, se vor afișa detalii despre angajații alocați fiecărui zbor, inclusiv codul angajatului, tipul acestuia și salariul. Rezultatul trebuie să includă toate zborurile, chiar și pe acelea pentru care nu există rezervări sau angajați alocați.*/
+
+SELECT
+  z.cod_zbor,
+  a.nume_aeronava,
+  ap.nume AS aeroport_plecare,
+  asos.nume AS aeroport_sosire,
+  r.cod_client,
+  r.data_rezervarii,
+  ag.cod_angajat,
+  ag.tip_angajat,
+  ag.salariu
+FROM zbor z
+LEFT JOIN aeronava a ON z.cod_aeronava = a.cod_aeronava
+LEFT JOIN aeroport ap ON z.cod_aeroport_plecare = ap.cod_aeroport
+LEFT JOIN aeroport asos ON z.cod_aeroport_sosire = asos.cod_aeroport
+LEFT JOIN rezervare r ON z.cod_zbor = r.cod_zbor
+LEFT JOIN orar_angajati oa ON oa.cod_zbor = z.cod_zbor
+LEFT JOIN angajat ag ON ag.cod_angajat = oa.cod_angajat
+ORDER BY z.cod_zbor;
+
+
+/*2.Să se afișeze clienții care au făcut rezervări pentru toate zborurile disponibile în sistem.*/
+
+SELECT c.cod_client
+FROM client c
+WHERE NOT EXISTS (
+    SELECT *
+    FROM zbor z
+    WHERE NOT EXISTS (
+        SELECT *
+        FROM rezervare r
+        WHERE r.cod_client = c.cod_client
+          AND r.cod_zbor = z.cod_zbor
+    )
+);
+
+
+/*Selectați primii 3 clienți care au făcut cele mai multe rezervări pentru zboruri ce implică date calendaristice diferite pentru plecare și sosire.*/
+
+SELECT * FROM (
+    SELECT r.cod_client, COUNT(*) AS nr_rezervari
+    FROM rezervare r
+    JOIN zbor z ON r.cod_zbor = z.cod_zbor
+    WHERE z.data_sosire > z.data_plecare
+    GROUP BY r.cod_client
+    ORDER BY nr_rezervari DESC
+)
+WHERE ROWNUM <= 3;
+
+
+
+
+
+
+
+
+
+
+
+
